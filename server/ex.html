@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Isometric Map Demo (Phaser 3)</title>
+    <style>
+      html, body { height: 100%; margin: 0; background:#0b1020; }
+      #phaser-example { width: 100%; height: 100%; display: grid; place-items: center; }
+      .hint { position: fixed; left: 12px; top: 12px; color:#cbd5e1; font-family: system-ui, sans-serif; opacity:.85; }
+    </style>
+    <!-- Phaser 3 (stable 3.x). If you prefer a specific version, pin it. -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.0/dist/phaser.min.js"></script>
+  </head>
+  <body>
+    <div class="hint">Phaser 3 Isometric map — assets served from phaserfiles CDN.</div>
+    <div id="phaser-example"></div>
+
+    <script>
+class IsoScene extends Phaser.Scene {
+  preload() {
+    this.load.tilemapTiledJSON('map', 'assets/iso/map.json');    // exported from Tiled
+    this.load.image('tiles', 'assets/iso/tileset.png');          // your tileset image
+    this.load.image('hero', 'assets/iso/hero.png');              // placeholder sprite
+  }
+  create() {
+    const map = this.make.tilemap({ key: 'map' });
+    const tiles = map.addTilesetImage('TilesetNameInTiled', 'tiles');
+    const ground = map.createLayer('Ground', tiles);
+    ground.setDepth(0);
+
+    this.player = this.add.image(400, 200, 'hero');
+    this.player.depth = this.player.y;
+
+    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+    this.cameras.main.startFollow(this.player, false, 0.1, 0.1);
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+  }
+  update() {
+    const s = 2; // speed in px/frame
+    if (this.cursors.left.isDown)  this.player.x -= s;
+    if (this.cursors.right.isDown) this.player.x += s;
+    if (this.cursors.up.isDown)    this.player.y -= s;
+    if (this.cursors.down.isDown)  this.player.y += s;
+    this.player.depth = this.player.y; // keep sorting correct
+  }
+}
+new Phaser.Game({ type: Phaser.AUTO, width: 960, height: 540, scene: IsoScene });
+    </script>
+  </body>
+</html>
