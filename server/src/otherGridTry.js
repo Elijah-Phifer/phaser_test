@@ -22,11 +22,12 @@ const MAP_W = COLS * TILE_WIDTH;
 const MAP_H = ROWS * TILE_HEIGHT;
 
 const BASE_ANGLE = 0; // rotate so "up" looks correct for your art
+// dir = 0: up, 1: right, 2: down, 3: left
 const DIR2VEC = [
-  { dx: 0,  dy: -1 }, // up
-  { dx: 1,  dy:  0 }, // right
-  { dx: 0,  dy:  1 }, // down
-  { dx: -1, dy:  0 }  // left
+  { dx: 0,  dy: -1 },
+  { dx: 1,  dy:  0 },
+  { dx: 0,  dy:  1 },
+  { dx: -1, dy:  0 }
 ];
 
 const config = {
@@ -37,8 +38,8 @@ const config = {
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: COLS * TILE_WIDTH,
-    height: ROWS * TILE_HEIGHT
+    width: MAP_W,
+    height: MAP_H
   },
   scene: { preload, create, update }
 };
@@ -46,27 +47,27 @@ const config = {
 new Phaser.Game(config);
 
 // ---- globals ----
-let map, layer, player, cursors, wasd;
+let map, layer, player, cursors, wasd, grabKey;
 let playerTile = new Phaser.Math.Vector2(1, 1);
 let dir = 0;
 let isMoving = false;
 
-// star state
-let star, starTile = new Phaser.Math.Vector2(3, 1); // place the star on a walkable tile
+let star, starTile = new Phaser.Math.Vector2(3, 1);
+let isTowing = false;
 
 function preload() {
   this.load.image('tiles', 'assets/tiles.png');
-  this.load.image('car', 'assets/spriteOpen_0.png'); // single-frame is fine
-  this.load.image('star', 'assets/star.png');        // add this file to assets/
+  this.load.image('car',  'assets/spriteOpen_0.png'); // single-frame sprite
+  this.load.image('star', 'assets/star.png');         // put a star.png in /assets
 }
 
 function create() {
   map = this.make.tilemap({ data, tileWidth: TILE_WIDTH, tileHeight: TILE_HEIGHT });
   const tileset = map.addTilesetImage('tiles', 'tiles', TILE_WIDTH, TILE_HEIGHT, TILE_MARGIN, TILE_SPACING);
   layer = map.createLayer(0, tileset, 0, 0);
-  layer.setCollision([5]); // walls
+  layer.setCollision([5]); // walls are 5
 
-  // player
+  // car
   const start = tileCenterWorldXY(playerTile.x, playerTile.y);
   player = this.add.image(start.x, start.y, 'car').setOrigin(0.5);
   applyFacing();
@@ -82,22 +83,32 @@ function create() {
   // input
   cursors = this.input.keyboard.createCursorKeys();
   wasd = this.input.keyboard.addKeys({ up: 'W', left: 'A', down: 'S', right: 'D' });
+  grabKey = this.input.keyboard.addKey('E');
 }
 
 function update() {
   if (isMoving) return;
 
+  // toggle grab / tow
+  if (Phaser.Input.Keyboard.JustDown(grabKey)) {
+    toggleTow.call(this);
+    return;
+  }
+
+  // rotate
   if (Phaser.Input.Keyboard.JustDown(cursors.left) || Phaser.Input.Keyboard.JustDown(wasd.left)) {
     dir = (dir + 3) % 4; applyFacing(); return;
   }
   if (Phaser.Input.Keyboard.JustDown(cursors.right) || Phaser.Input.Keyboard.JustDown(wasd.right)) {
     dir = (dir + 1) % 4; applyFacing(); return;
   }
+
+  // step
   if (Phaser.Input.Keyboard.JustDown(cursors.up) || Phaser.Input.Keyboard.JustDown(wasd.up)) {
-    tryStep(+1); return;
+    tryStep.call(this, +1); return;
   }
   if (Phaser.Input.Keyboard.JustDown(cursors.down) || Phaser.Input.Keyboard.JustDown(wasd.down)) {
-    tryStep(-1); return;
+    tryStep.call(this, -1); return;
   }
 }
 
@@ -105,51 +116,72 @@ function applyFacing() {
   player.setAngle(BASE_ANGLE + dir * 90);
 }
 
+function toggleTow() {
+  if (isTowing) {
+    // drop / detach
+    isTowing = false;
+    star.clearTint();
+    return;
+  }
+
+  // try to grab: star must be in the tile directly in front
+  const v = DIR2VEC[dir];
+  const frontX = playerTile.x + v.dx;
+  const frontY = playerTile.y + v.dy;
+
+  const isFront = (starTile.x === frontX && starTile.y === frontY);
+  if (!isFront) return; // nothing to grab
+
+  // we will tow the star BEHIND the car; that tile must be free
+  const backX = playerTile.x - v.dx;
+  const backY = playerTile.y - v.dy;
+  if (!inBounds(backX, backY) || isWall(backX, backY)) return;
+
+  // latch on: move star behind the car instantly (or tween if you prefer)
+  const behind = tileCenterWorldXY(backX, backY);
+  starTile.set(backX, backY);
+  star.setPosition(behind.x, behind.y);
+
+  isTowing = true;
+  star.setTint(0x80ff80); // visual cue: towed
+}
+
 function tryStep(sign) {
   const v = DIR2VEC[dir];
   const tx = playerTile.x + v.dx * sign;
   const ty = playerTile.y + v.dy * sign;
 
-  // out of bounds?
-  if (!inBounds(tx, ty)) return;
+  if (!inBounds(tx, ty) || isWall(tx, ty)) return;
 
-  // wall in front?
-  if (isWall(tx, ty)) return;
+  // If not towing, the star blocks your path (no push in this mode)
+  if (!isTowing && starTile.x === tx && starTile.y === ty) return;
 
-  // is the star in front?
-  const pushingStar = (starTile.x === tx && starTile.y === ty);
+  // Compute tween targets
+  const destPlayer = tileCenterWorldXY(tx, ty);
 
-  if (pushingStar) {
-    // tile beyond star
-    const nx = tx + v.dx * sign;
-    const ny = ty + v.dy * sign;
+  if (isTowing) {
+    // star moves into the tile the car just left (playerTile)
+    const starNextTile = new Phaser.Math.Vector2(playerTile.x, playerTile.y);
+    const destStar = tileCenterWorldXY(starNextTile.x, starNextTile.y);
 
-    if (!inBounds(nx, ny) || isWall(nx, ny)) return; // can't push into wall/outside
-
-    // move both with synced tweens
     isMoving = true;
-    const destPlayer = tileCenterWorldXY(tx, ty); // car moves into star's old tile
-    const destStar   = tileCenterWorldXY(nx, ny); // star moves one tile forward
-
     let done = 0;
     const finish = () => {
-      done++;
-      if (done === 2) {
+      if (++done === 2) {
         playerTile.set(tx, ty);
-        starTile.set(nx, ny);
+        starTile.copy(starNextTile);
         isMoving = false;
       }
     };
 
-    player.scene.tweens.add({ targets: player, x: destPlayer.x, y: destPlayer.y, duration: 160, ease: 'Linear', onComplete: finish });
-    player.scene.tweens.add({ targets: star,   x: destStar.x,   y: destStar.y,   duration: 160, ease: 'Linear', onComplete: finish });
+    this.tweens.add({ targets: player, x: destPlayer.x, y: destPlayer.y, duration: 160, ease: 'Linear', onComplete: finish });
+    this.tweens.add({ targets: star,   x: destStar.x,   y: destStar.y,   duration: 160, ease: 'Linear', onComplete: finish });
   } else {
-    // normal step
+    // normal step (no towing)
     isMoving = true;
-    const dest = tileCenterWorldXY(tx, ty);
-    player.scene.tweens.add({
+    this.tweens.add({
       targets: player,
-      x: dest.x, y: dest.y,
+      x: destPlayer.x, y: destPlayer.y,
       duration: 160, ease: 'Linear',
       onComplete: () => { playerTile.set(tx, ty); isMoving = false; }
     });
