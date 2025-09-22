@@ -1,8 +1,8 @@
 // Base game size (virtual resolution). Change to make it “bigger” logically.
 const GAME_SIZE = 1280;
-const TILE = 64;  // tile size
-const GRID_W = 8;   // how many tiles fit horizontally
-const GRID_H = 8;   // how many tiles fit vertically
+const TILE = 100;  // tile size
+const GRID_W = 20;   // how many tiles fit horizontally
+const GRID_H = 20;   // how many tiles fit vertically
 const PADDING = 30; // padding around the edges
 const BOARD_W = GRID_W*TILE;  // how many tiles wide
 const BOARD_H = GRID_H*TILE;  // how many tiles high
